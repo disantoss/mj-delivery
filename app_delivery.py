@@ -74,10 +74,12 @@ def get_db_connection():
     if not DB_AVAILABLE:
         return None
     try:
-        server = st.secrets.get('db_server')
-        database = st.secrets.get('db_database')
-        username = st.secrets.get('db_username')
-        password = st.secrets.get('db_password')
+        import os
+        # Tenta ler do secrets.toml (local) ou Environment variables (Azure)
+        server = st.secrets.get('db_server') or os.getenv('db_server')
+        database = st.secrets.get('db_database') or os.getenv('db_database')
+        username = st.secrets.get('db_username') or os.getenv('db_username')
+        password = st.secrets.get('db_password') or os.getenv('db_password')
         
         password_encoded = quote(password, safe='')
         connection_string = f"mssql+pymssql://{username}:{password_encoded}@{server}/{database}"
