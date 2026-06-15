@@ -56,8 +56,12 @@ div[data-testid="metric-container"] label{{color:{C['muted']}!important;font-siz
 div[data-testid="metric-container"] [data-testid="stMetricValue"]{{color:{C['gold']}!important;font-size:22px!important;font-weight:600!important;}}
 .stTabs [data-baseweb="tab-list"]{{border-bottom:2px solid {C['border']};background:{C['bg2']};}}
 .stTabs [aria-selected="true"]{{color:{C['gold']}!important;border-bottom:2px solid {C['gold']}!important;background:{C['bg3']}!important;}}
-.stSelectbox>div>div, .stSelectbox [data-baseweb="select"]{{background:{C['bg3']}!important;border-color:{C['border']}!important;color:{C['cream']}!important;}}
-.stDateInput input{{background:{C['bg3']}!important;border-color:{C['border']}!important;color:{C['cream']}!important;}}
+.stSelectbox>div>div, .stSelectbox [data-baseweb="select"]{{background:{C['bg3']}!important;border:1px solid {C['muted']}!important;color:{C['cream']}!important;border-radius:8px!important;}}
+.stDateInput input{{background:{C['bg3']}!important;border:1px solid {C['muted']}!important;color:{C['cream']}!important;border-radius:8px!important;font-weight:600!important;}}
+.stSelectbox label, .stDateInput label{{color:{C['gold']}!important;font-weight:600!important;font-size:13px!important;margin-bottom:8px!important;}}
+[data-baseweb="popover"], [data-baseweb="popover"] [data-baseweb="menu"], [data-baseweb="menu"], [role="listbox"], [role="option"], [data-baseweb="select"] [data-baseweb="list"]{{background:{C['bg2']}!important;}}
+[data-baseweb="popover"] li, [data-baseweb="menu"] li, [role="listbox"] li, [role="option"], [data-baseweb="select"] [data-baseweb="list"] li{{color:{C['cream']}!important;background:{C['bg2']}!important;font-weight:600!important;padding:10px!important;}}
+[data-baseweb="popover"] li:hover, [data-baseweb="menu"] li:hover, [role="option"]:hover, [data-baseweb="select"] [data-baseweb="list"] li:hover{{background:{C['bg3']}!important;color:{C['gold']}!important;}}
 h1,h2,h3,h4,p,span,li{{color:{C['cream']}!important;}}
 </style>
 """, unsafe_allow_html=True)
