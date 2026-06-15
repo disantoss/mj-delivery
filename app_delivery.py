@@ -75,11 +75,17 @@ def get_db_connection():
         return None
     try:
         import os
-        # Tenta ler do secrets.toml (local) ou Environment variables (Azure)
-        server = st.secrets.get('db_server') or os.getenv('db_server')
-        database = st.secrets.get('db_database') or os.getenv('db_database')
-        username = st.secrets.get('db_username') or os.getenv('db_username')
-        password = st.secrets.get('db_password') or os.getenv('db_password')
+        # Tenta ler do Environment variables (Azure) primeiro, depois secrets.toml (local)
+        try:
+            server = st.secrets['db_server']
+            database = st.secrets['db_database']
+            username = st.secrets['db_username']
+            password = st.secrets['db_password']
+        except (FileNotFoundError, KeyError):
+            server = os.getenv('db_server')
+            database = os.getenv('db_database')
+            username = os.getenv('db_username')
+            password = os.getenv('db_password')
         
         password_encoded = quote(password, safe='')
         connection_string = f"mssql+pymssql://{username}:{password_encoded}@{server}/{database}"
