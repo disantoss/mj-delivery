@@ -1,0 +1,8 @@
+
+Delivery fazer um site de performance estilo o site de acompanhamento de garçons, mas acompanhamento dos deliverys :
+
+tanto para delivery de lojas pizzaria quanto para lojas dark kitchen.
+
+No banco na fVendas tem modo de venda onde eu posso trazer tudo que é entrega das lojas, tem "mesa" e "delivery".
+
+

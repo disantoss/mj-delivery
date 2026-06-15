@@ -1,0 +1,1 @@
+visual de delivery - sempre comparar o dia com o dia da semana anterior - numero de pedidos
