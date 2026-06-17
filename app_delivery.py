@@ -30,6 +30,12 @@ C = {
     'grid':    '#3A2010', 'delivery': '#FF6B35',
 }
 CORES_TURNO = {'Noite': C['noite'], 'Intercalado': C['interc'], 'Dia': C['dia']}
+CORES_CANAL = {
+    '99Food': '#E74C3C',
+    'Ifood': '#F39C12', 
+    'Loja': '#27AE60',
+    'Alphacode': '#3498DB'
+}
 
 def chart_layout(**kw):
     base = dict(
@@ -46,7 +52,7 @@ def chart_layout(**kw):
 
 st.markdown(f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght=300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 html,body,[class*="css"]{{font-family:'Inter',sans-serif;background-color:{C['bg']}!important;color:{C['cream']}!important;}}
 #MainMenu,footer,header{{visibility:hidden;}}
 [data-testid="collapsedControl"]{{display:none!important;}}
@@ -66,9 +72,10 @@ h1,h2,h3,h4,p,span,li{{color:{C['cream']}!important;}}
 </style>
 """, unsafe_allow_html=True)
 
-# Data padrão: segunda-feira da semana atual
+# Data padrão: últimas 5 semanas (período atual + 4 semanas atrás)
 hoje = date.today()
-segunda = hoje - timedelta(days=hoje.weekday())
+segunda_atual = hoje - timedelta(days=hoje.weekday())  # Segunda desta semana
+data_ini_padrao = segunda_atual - timedelta(weeks=4)   # 4 semanas atrás
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONEXÃO BANCO
@@ -79,7 +86,6 @@ def get_db_connection():
         return None
     try:
         import os
-        # Tenta ler do Environment variables (Azure) primeiro, depois secrets.toml (local)
         try:
             server = st.secrets['db_server']
             database = st.secrets['db_database']
@@ -100,7 +106,32 @@ def get_db_connection():
         return None
 
 def fmt_brl(val):
+    if pd.isna(val) or val == 0:
+        return "R$ 0,00"
     return f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+def calcular_semanas(df):
+    """Calcula faturamento semana atual vs semana anterior"""
+    if df is None or df.empty:
+        return None, None, None
+    
+    hoje = pd.Timestamp(date.today())
+    segunda_atual = hoje - timedelta(days=hoje.weekday())
+    segunda_anterior = segunda_atual - timedelta(weeks=1)
+    
+    # Semana atual (segunda até hoje)
+    df_semana_atual = df[(df['Data'] >= segunda_atual) & (df['Data'] <= hoje)]
+    fat_semana_atual = df_semana_atual['Faturamento_Bruto'].sum() if not df_semana_atual.empty else 0
+    
+    # Semana anterior (segunda até domingo da semana anterior)
+    domingo_anterior = segunda_atual - timedelta(days=1)
+    df_semana_anterior = df[(df['Data'] >= segunda_anterior) & (df['Data'] <= domingo_anterior)]
+    fat_semana_anterior = df_semana_anterior['Faturamento_Bruto'].sum() if not df_semana_anterior.empty else 0
+    
+    # Variação
+    variacao = ((fat_semana_atual - fat_semana_anterior) / fat_semana_anterior * 100) if fat_semana_anterior > 0 else 0
+    
+    return fat_semana_atual, fat_semana_anterior, variacao
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CARREGAMENTO DE DADOS
@@ -122,7 +153,7 @@ def carregar_lojas():
 
 @st.cache_data(ttl=300, show_spinner=False)
 def carregar_dados_delivery(data_ini, data_fim, loja_nome=None):
-    """Carrega dados de DELIVERY"""
+    """Carrega dados de DELIVERY com CanalVenda e Marca"""
     engine = get_db_connection()
     if engine is None:
         return None
@@ -130,8 +161,9 @@ def carregar_dados_delivery(data_ini, data_fim, loja_nome=None):
     try:
         query = f"""
         SELECT 
-            v.Data, v.loja_id, l.Loja_Nome, v.venda_id, v.SK_Funcionario,
-            v.Faturamento_Bruto, v.Qtd_Item, v.Turno_Venda, v.ModoVenda, v.qtd_pessoas
+            v.Data, v.loja_id, l.Loja_Nome, v.venda_id,
+            v.SK_Funcionario, v.Faturamento_Bruto, v.Qtd_Item, 
+            v.Turno_Venda, v.ModoVenda, v.CanalVenda, v.Marca
         FROM vw_BI_fVendas v
         LEFT JOIN vw_BI_dLoja l ON v.loja_id = l.Loja_ID
         WHERE v.ModoVenda = 'Delivery'
@@ -156,7 +188,7 @@ def filtros_globais(key_prefix='dlv'):
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        data_ini = st.date_input('📅 Data Inicial', value=segunda, key=f'{key_prefix}_data_ini')
+        data_ini = st.date_input('📅 Data Inicial', value=data_ini_padrao, key=f'{key_prefix}_data_ini')
     with col2:
         data_fim = st.date_input('📅 Data Final', value=date.today(), key=f'{key_prefix}_data_fim')
     with col3:
@@ -171,6 +203,7 @@ def filtros_globais(key_prefix='dlv'):
 # VIEWS
 # ══════════════════════════════════════════════════════════════════════════════
 def view_delivery():
+    """Dashboard principal de Delivery"""
     gold = C['gold']
     st.markdown(f"<h1 style='color:{gold};'>📊 Dashboard de Delivery</h1>", unsafe_allow_html=True)
     
@@ -197,10 +230,26 @@ def view_delivery():
     st.divider()
     
     # Abas
-    tab1, tab2, tab3 = st.tabs(['📈 Tendência', '🏪 Por Loja', '⏰ Horário & Turno'])
+    tab1, tab2, tab3, tab4 = st.tabs(['📈 Tendência', '🏪 Por Loja', '⏰ Horário & Turno', '🛣️ Por Canal'])
     
     with tab1:
-        st.markdown('#### 📈 Faturamento Diário')
+        st.markdown('#### 📊 Comparação: Semana Atual vs Semana Anterior')
+        
+        # Calcular semanas
+        fat_atual, fat_anterior, variacao = calcular_semanas(df)
+        
+        # Cards de comparação
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric('📆 Semana Atual', fmt_brl(fat_atual))
+        with col2:
+            st.metric('📅 Semana Anterior', fmt_brl(fat_anterior))
+        with col3:
+            cor = '🟢' if variacao >= 0 else '🔴'
+            st.metric(f'{cor} Variação', f'{variacao:.1f}%')
+        
+        st.divider()
+        st.markdown('#### 📈 Faturamento Diário (Últimas 5 Semanas)')
         df_daily = df.groupby('Data')['Faturamento_Bruto'].sum().reset_index().sort_values('Data')
         fig = px.area(df_daily, x='Data', y='Faturamento_Bruto', color_discrete_sequence=[C['delivery']])
         fig.update_traces(line=dict(width=3))
@@ -232,6 +281,276 @@ def view_delivery():
         fig.update_traces(textposition='outside')
         fig.update_layout(**chart_layout(height=350, xaxis_title='Turno', yaxis_title='Faturamento (R$)'))
         st.plotly_chart(fig, use_container_width=True)
+    
+    with tab4:
+        st.markdown('#### 🛣️ Faturamento por Canal de Venda')
+        df_canal = df.groupby('CanalVenda').agg({
+            'Faturamento_Bruto': 'sum',
+            'venda_id': 'nunique',
+            'Qtd_Item': 'sum'
+        }).reset_index().sort_values('Faturamento_Bruto', ascending=False)
+        
+        df_canal.columns = ['Canal', 'Faturamento', 'Qtd_Vendas', 'Itens']
+        
+        # Cards de KPI por Canal
+        cols = st.columns(len(df_canal))
+        for idx, (_, row) in enumerate(df_canal.iterrows()):
+            with cols[idx]:
+                st.metric(f"🛣️ {row['Canal']}", fmt_brl(row['Faturamento']))
+        
+        st.divider()
+        
+        # Gráfico de barras
+        fig = px.bar(df_canal, x='Canal', y='Faturamento',
+                    color='Canal', color_discrete_map=CORES_CANAL,
+                    text=df_canal['Faturamento'].apply(fmt_brl))
+        fig.update_traces(textposition='outside')
+        fig.update_layout(**chart_layout(height=400, xaxis_title='Canal de Venda', yaxis_title='Faturamento (R$)'))
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.dataframe(df_canal, use_container_width=True, hide_index=True)
+
+def view_categorias():
+    """Análise por Canal, Marca e Loja"""
+    gold = C['gold']
+    st.markdown(f"<h1 style='color:{gold};'>🏷️ Canal • Marca • Loja</h1>", unsafe_allow_html=True)
+    
+    data_ini, data_fim, loja_nome, loja_sel = filtros_globais('cat')
+    
+    with st.spinner('🔍 Carregando dados por categoria...'):
+        df = carregar_dados_delivery(data_ini, data_fim, loja_nome)
+    
+    if df is None or df.empty:
+        st.warning('📭 Nenhum delivery encontrado neste período.')
+        return
+    
+    # ════════════════════════════════════════════════════════════════
+    # Se filtrou por loja específica, mostrar análise detalhada
+    # ════════════════════════════════════════════════════════════════
+    if loja_nome:
+        st.markdown(f"### 🏪 Análise Detalhada: **{loja_nome}**")
+        st.divider()
+        
+        # KPIs gerais da loja
+        fat_loja = df['Faturamento_Bruto'].sum()
+        deliveries_loja = df['venda_id'].nunique()
+        canais_ativos = df['CanalVenda'].nunique()
+        marcas_ativas = df['Marca'].nunique()
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric('💰 Faturamento', fmt_brl(fat_loja))
+        col2.metric('📦 Deliveries', f"{int(deliveries_loja):,}".replace(',', '.'))
+        col3.metric('🛣️ Canais Ativos', f"{int(canais_ativos)}")
+        col4.metric('🏷️ Marcas Ativas', f"{int(marcas_ativas)}")
+        st.divider()
+        
+        # Tabs para análise da loja
+        tab_canal, tab_marca, tab_cruzado, tab_tabela = st.tabs(
+            ['🛣️ Canais', '🏷️ Marcas', '🔄 Cruzamento', '📋 Tabela Completa']
+        )
+        
+        with tab_canal:
+            st.markdown(f'#### 🛣️ Faturamento por Canal em {loja_nome}')
+            df_canal_loja = df.groupby('CanalVenda').agg({
+                'Faturamento_Bruto': 'sum',
+                'venda_id': 'nunique',
+                'Qtd_Item': 'sum'
+            }).reset_index().sort_values('Faturamento_Bruto', ascending=False)
+            df_canal_loja.columns = ['Canal', 'Faturamento', 'Vendas', 'Itens']
+            
+            # KPI Cards
+            cols_canal = st.columns(len(df_canal_loja))
+            for idx, (_, row) in enumerate(df_canal_loja.iterrows()):
+                with cols_canal[idx]:
+                    st.metric(row['Canal'], fmt_brl(row['Faturamento']), f"{int(row['Vendas'])} vendas")
+            
+            st.divider()
+            
+            # Gráfico de barras
+            fig_canal = px.bar(df_canal_loja, x='Canal', y='Faturamento',
+                              color='Canal', color_discrete_map=CORES_CANAL,
+                              text=df_canal_loja['Faturamento'].apply(fmt_brl),
+                              hover_data=['Vendas', 'Itens'])
+            fig_canal.update_traces(textposition='outside')
+            fig_canal.update_layout(**chart_layout(height=400, xaxis_title='Canal', yaxis_title='Faturamento (R$)'))
+            st.plotly_chart(fig_canal, use_container_width=True)
+            
+            # Gráfico de pizza
+            fig_pie = px.pie(df_canal_loja, names='Canal', values='Faturamento',
+                            color_discrete_map=CORES_CANAL)
+            fig_pie.update_layout(**chart_layout(height=400))
+            st.plotly_chart(fig_pie, use_container_width=True)
+        
+        with tab_marca:
+            st.markdown(f'#### 🏷️ Faturamento por Marca em {loja_nome}')
+            df_marca_loja = df.groupby('Marca').agg({
+                'Faturamento_Bruto': 'sum',
+                'venda_id': 'nunique'
+            }).reset_index().sort_values('Faturamento_Bruto', ascending=False)
+            df_marca_loja.columns = ['Marca', 'Faturamento', 'Vendas']
+            
+            fig_marca = px.bar(df_marca_loja, x='Faturamento', y='Marca', orientation='h',
+                              text=df_marca_loja['Faturamento'].apply(fmt_brl),
+                              color='Faturamento', color_continuous_scale='Oranges')
+            fig_marca.update_traces(textposition='outside')
+            fig_marca.update_layout(**chart_layout(height=max(400, len(df_marca_loja)*30), xaxis_title='Faturamento (R$)'))
+            st.plotly_chart(fig_marca, use_container_width=True)
+        
+        with tab_cruzado:
+            st.markdown(f'#### 🔄 Marcas por Canal em {loja_nome}')
+            
+            # Criar tabela de cruzamento
+            df_cruzado = df.groupby(['CanalVenda', 'Marca'])['Faturamento_Bruto'].sum().reset_index()
+            df_pivot = df_cruzado.pivot_table(
+                values='Faturamento_Bruto',
+                index='Marca',
+                columns='CanalVenda',
+                fill_value=0,
+                aggfunc='sum'
+            )
+            df_pivot = df_pivot.sort_values(by=df_pivot.columns[0] if len(df_pivot.columns) > 0 else df_pivot.index[0], ascending=False)
+            
+            # Heatmap
+            fig_heatmap = px.imshow(df_pivot,
+                                   labels=dict(color='Faturamento (R$)'),
+                                   color_continuous_scale='YlOrRd',
+                                   text_auto=True,
+                                   aspect='auto')
+            fig_heatmap.update_layout(**chart_layout(height=max(400, len(df_pivot)*25)))
+            st.plotly_chart(fig_heatmap, use_container_width=True)
+            
+            # Sunburst para visualizar hierarquia
+            st.markdown('#### 🌟 Sunburst: Hierarquia de Faturamento')
+            df_sunburst = df.groupby(['CanalVenda', 'Marca'])['Faturamento_Bruto'].sum().reset_index()
+            df_sunburst.columns = ['Canal', 'Marca', 'Faturamento']
+            
+            if not df_sunburst.empty:
+                # Preparar dados para sunburst de forma simplificada
+                canais_unicos = df_sunburst['Canal'].unique().tolist()
+                
+                # Criar listas manualmente para evitar problemas
+                labels_list = ['Todas as Lojas'] + canais_unicos + df_sunburst['Marca'].tolist()
+                parents_list = [''] + ['Todas as Lojas'] * len(canais_unicos) + df_sunburst['Canal'].tolist()
+                values_list = [df_sunburst['Faturamento'].sum()] + \
+                             [df_sunburst[df_sunburst['Canal']==c]['Faturamento'].sum() for c in canais_unicos] + \
+                             df_sunburst['Faturamento'].tolist()
+                
+                fig_sunburst = go.Figure(go.Sunburst(
+                    labels=labels_list,
+                    parents=parents_list,
+                    values=values_list,
+                    branchvalues='total',
+                    marker=dict(colorscale='YlOrRd')
+                ))
+                fig_sunburst.update_layout(**chart_layout(height=500))
+                st.plotly_chart(fig_sunburst, use_container_width=True)
+            else:
+                st.info('Sem dados para exibir sunburst neste período')
+        
+        with tab_tabela:
+            st.markdown(f'#### 📋 Detalhamento Completo: {loja_nome}')
+            detalhe = df.groupby(['CanalVenda', 'Marca']).agg({
+                'Faturamento_Bruto': 'sum',
+                'venda_id': 'nunique',
+                'Qtd_Item': 'sum'
+            }).reset_index().sort_values('Faturamento_Bruto', ascending=False)
+            detalhe.columns = ['Canal', 'Marca', 'Faturamento', 'Vendas', 'Itens']
+            detalhe['Faturamento_fmt'] = detalhe['Faturamento'].apply(fmt_brl)
+            
+            st.dataframe(
+                detalhe[['Canal', 'Marca', 'Faturamento_fmt', 'Vendas', 'Itens']],
+                use_container_width=True, hide_index=True
+            )
+    
+    else:
+        # ════════════════════════════════════════════════════════════════
+        # Análise GERAL (todas as lojas)
+        # ════════════════════════════════════════════════════════════════
+        st.markdown('### 📊 Análise Geral - Todos os Canais & Marcas')
+        st.divider()
+        
+        # KPIs gerais
+        fat_geral = df['Faturamento_Bruto'].sum()
+        deliveries_geral = df['venda_id'].nunique()
+        canais_ativos = df['CanalVenda'].nunique()
+        marcas_ativas = df['Marca'].nunique()
+        lojas_ativas = df['Loja_Nome'].nunique()
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric('💰 Faturamento', fmt_brl(fat_geral))
+        col2.metric('📦 Deliveries', f"{int(deliveries_geral):,}".replace(',', '.'))
+        col3.metric('🏪 Lojas', f"{int(lojas_ativas)}")
+        col4.metric('🛣️ Canais', f"{int(canais_ativos)}")
+        col5.metric('🏷️ Marcas', f"{int(marcas_ativas)}")
+        st.divider()
+        
+        tab_canal, tab_marca, tab_loja_canal, tab_tabela_geral = st.tabs(
+            ['🛣️ Por Canal', '🏷️ Por Marca', '🏪 Loja × Canal', '📋 Tabela']
+        )
+        
+        with tab_canal:
+            st.markdown('#### 🛣️ Faturamento por Canal (Geral)')
+            df_canal_geral = df.groupby('CanalVenda').agg({
+                'Faturamento_Bruto': 'sum',
+                'venda_id': 'nunique',
+                'Qtd_Item': 'sum'
+            }).reset_index().sort_values('Faturamento_Bruto', ascending=False)
+            df_canal_geral.columns = ['Canal', 'Faturamento', 'Vendas', 'Itens']
+            
+            cols_canal = st.columns(len(df_canal_geral))
+            for idx, (_, row) in enumerate(df_canal_geral.iterrows()):
+                with cols_canal[idx]:
+                    st.metric(row['Canal'], fmt_brl(row['Faturamento']))
+            
+            st.divider()
+            
+            fig = px.bar(df_canal_geral, x='Canal', y='Faturamento',
+                        color='Canal', color_discrete_map=CORES_CANAL,
+                        text=df_canal_geral['Faturamento'].apply(fmt_brl))
+            fig.update_traces(textposition='outside')
+            fig.update_layout(**chart_layout(height=400, xaxis_title='Canal', yaxis_title='Faturamento (R$)'))
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with tab_marca:
+            st.markdown('#### 🏷️ Faturamento por Marca (Geral)')
+            df_marca_geral = df.groupby('Marca').agg({
+                'Faturamento_Bruto': 'sum',
+                'venda_id': 'nunique'
+            }).reset_index().sort_values('Faturamento_Bruto', ascending=False).head(15)
+            df_marca_geral.columns = ['Marca', 'Faturamento', 'Vendas']
+            
+            fig = px.bar(df_marca_geral, x='Faturamento', y='Marca', orientation='h',
+                        text=df_marca_geral['Faturamento'].apply(fmt_brl),
+                        color='Faturamento', color_continuous_scale='Oranges')
+            fig.update_traces(textposition='outside')
+            fig.update_layout(**chart_layout(height=400, xaxis_title='Faturamento (R$)'))
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with tab_loja_canal:
+            st.markdown('#### 🏪 Faturamento por Loja e Canal')
+            df_loja_canal = df.groupby(['Loja_Nome', 'CanalVenda'])['Faturamento_Bruto'].sum().reset_index()
+            
+            fig = px.bar(df_loja_canal, x='Loja_Nome', y='Faturamento_Bruto',
+                        color='CanalVenda', color_discrete_map=CORES_CANAL,
+                        barmode='stack')
+            fig.update_layout(**chart_layout(height=400, xaxis_title='Loja', yaxis_title='Faturamento (R$)',
+                                             margin=dict(b=120)))
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with tab_tabela_geral:
+            st.markdown('#### 📋 Detalhamento Geral')
+            detalhe_geral = df.groupby(['Loja_Nome', 'CanalVenda', 'Marca']).agg({
+                'Faturamento_Bruto': 'sum',
+                'venda_id': 'nunique',
+                'Qtd_Item': 'sum'
+            }).reset_index().sort_values('Faturamento_Bruto', ascending=False)
+            detalhe_geral.columns = ['Loja', 'Canal', 'Marca', 'Faturamento', 'Vendas', 'Itens']
+            detalhe_geral['Faturamento_fmt'] = detalhe_geral['Faturamento'].apply(fmt_brl)
+            
+            st.dataframe(
+                detalhe_geral[['Loja', 'Canal', 'Marca', 'Faturamento_fmt', 'Vendas', 'Itens']],
+                use_container_width=True, hide_index=True
+            )
 
 def header():
     gold = C['gold']
@@ -242,4 +561,12 @@ def header():
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 header()
-view_delivery()
+
+# Abas principais
+main_tab1, main_tab2 = st.tabs(['📊 Dashboard', '🏷️ Canais & Marcas'])
+
+with main_tab1:
+    view_delivery()
+
+with main_tab2:
+    view_categorias()
