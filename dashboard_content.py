@@ -303,8 +303,8 @@ def view_delivery():
     col4.metric('📊 Itens', f"{int(itens):,}".replace(',', '.'))
     st.divider()
     
-    # Abas
-    tab1, tab2, tab3, tab4 = st.tabs(['📈 Tendência', '🏪 Por Loja', '⏰ Horário & Turno', '🛣️ Por Canal'])
+    # Abas principais
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(['📈 Tendência', '⏰ Turno', '🛣️ Por Canal', '🏷️ Por Marca', '📋 Tabela'])
     
     with tab1:
         st.markdown('#### 📊 Comparação: Semana Atual vs Semana Anterior')
@@ -330,22 +330,6 @@ def view_delivery():
         st.plotly_chart(fig, use_container_width=True)
     
     with tab2:
-        st.markdown('#### 🏪 Por Loja')
-        df_loja = df_filtrado.groupby('Loja_Nome').agg({'Faturamento_Bruto': 'sum', 'venda_id': 'nunique'}).reset_index()
-        df_loja.columns = ['Loja', 'Faturamento', 'Deliveries']
-        df_loja = df_loja.sort_values('Faturamento', ascending=False)
-        
-        fig = px.bar(df_loja, x='Loja', y='Faturamento', color='Deliveries', color_continuous_scale='Oranges',
-                    text=df_loja['Faturamento'].apply(fmt_brl))
-        fig.update_traces(textposition='outside')
-        fig.update_layout(**chart_layout(height=400, xaxis_title='Loja', yaxis_title='Faturamento (R$)', margin=dict(b=120)))
-        st.plotly_chart(fig, use_container_width=True)
-        
-        df_loja_display = df_loja.copy()
-        df_loja_display['Faturamento'] = df_loja_display['Faturamento'].apply(fmt_brl)
-        st.dataframe(df_loja_display, use_container_width=True, hide_index=True)
-    
-    with tab3:
         st.markdown('#### ⏰ Por Turno')
         df_turno = df_filtrado.groupby('Turno_Venda')['Faturamento_Bruto'].sum().reset_index().sort_values('Faturamento_Bruto', ascending=False)
         
@@ -355,7 +339,7 @@ def view_delivery():
         fig.update_layout(**chart_layout(height=350, xaxis_title='Turno', yaxis_title='Faturamento (R$)'))
         st.plotly_chart(fig, use_container_width=True)
     
-    with tab4:
+    with tab3:
         st.markdown('#### 🛣️ Faturamento por Canal de Venda')
         df_canal = df_filtrado.groupby('CanalVenda').agg({
             'Faturamento_Bruto': 'sum',
@@ -380,112 +364,39 @@ def view_delivery():
         st.plotly_chart(fig, use_container_width=True)
         
         st.dataframe(df_canal, use_container_width=True, hide_index=True)
-
-def view_categorias():
-    """Análise por Canal, Marca e Loja - OTIMIZADO"""
     
-    # ✅ Usar filtros_app unificados (sincronizados com outras abas)
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        data_ini = st.date_input('📅 Data Inicial', value=st.session_state.filtros_app['data_ini'], key='view_cat_d_ini')
-        st.session_state.filtros_app['data_ini'] = data_ini
-    with col2:
-        data_fim = st.date_input('📅 Data Final', value=st.session_state.filtros_app['data_fim'], key='view_cat_d_fim')
-        st.session_state.filtros_app['data_fim'] = data_fim
-    with col3:
-        with st.spinner('🏪 Carregando lojas...'):
-            lojas_opt = carregar_lojas()
-        loja_sel = st.selectbox('🏪 Loja', lojas_opt, index=lojas_opt.index(st.session_state.filtros_app['loja_sel']) if st.session_state.filtros_app['loja_sel'] in lojas_opt else 0, key='view_cat_d_loja')
-        st.session_state.filtros_app['loja_sel'] = loja_sel
-    
-    with st.spinner('🔍 Carregando dados de categorias...'):
-        df = carregar_dados_categorias(data_ini, data_fim)
-    
-    if df is None or df.empty:
-        st.warning('📭 Nenhum dado encontrado neste período.')
-        return
-    
-    # ✅ SEMPRE filtrar por loja (não tem mais opção "Todas")
-    df = df[df['Loja_Nome'] == loja_sel]
-    if df.empty:
-        st.warning('📭 Nenhum dado encontrado para esta loja.')
-        return
-    
-    # KPIs gerais
-    fat_geral = df['Faturamento_Bruto'].sum()
-    vendas_geral = df['venda_id'].nunique()
-    canais_ativos = df['CanalVenda'].nunique()
-    marcas_ativas = df['Marca'].nunique()
-    lojas_ativas = df['Loja_Nome'].nunique()
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric('💰 Faturamento', fmt_brl(fat_geral))
-    col2.metric('📦 Vendas', f"{int(vendas_geral):,}".replace(',', '.'))
-    col3.metric('🏪 Lojas', f"{int(lojas_ativas)}")
-    col4.metric('🛣️ Canais', f"{int(canais_ativos)}")
-    col5.metric('🏷️ Marcas', f"{int(marcas_ativas)}")
-    st.divider()
-    
-    tab_canal, tab_marca, tab_loja, tab_tabela = st.tabs(['🛣️ Por Canal', '🏷️ Por Marca', '🏪 Por Loja', '📋 Tabela'])
-    
-    with tab_canal:
-        st.markdown('#### 🛣️ Faturamento por Canal')
-        df_canal = df.groupby('CanalVenda').agg({
+    with tab4:
+        st.markdown('#### 🏷️ Top 15 Marcas')
+        df_marca = df_filtrado.groupby('Marca').agg({
             'Faturamento_Bruto': 'sum',
             'venda_id': 'nunique',
             'Qtd_Item': 'sum'
-        }).reset_index().sort_values('Faturamento_Bruto', ascending=False)
-        df_canal.columns = ['Canal', 'Faturamento', 'Vendas', 'Itens']
-        
-        fig = px.bar(df_canal, x='Canal', y='Faturamento',
-                    color='Canal', color_discrete_map=CORES_CANAL,
-                    text=df_canal['Faturamento'].apply(fmt_brl))
-        fig.update_traces(textposition='outside')
-        fig.update_layout(**chart_layout(height=400, xaxis_title='Canal', yaxis_title='Faturamento (R$)'))
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with tab_marca:
-        st.markdown('#### 🏷️ Top 15 Marcas')
-        df_marca = df.groupby('Marca').agg({
-            'Faturamento_Bruto': 'sum',
-            'venda_id': 'nunique'
         }).reset_index().sort_values('Faturamento_Bruto', ascending=False).head(15)
-        df_marca.columns = ['Marca', 'Faturamento', 'Vendas']
+        df_marca.columns = ['Marca', 'Faturamento', 'Vendas', 'Itens']
         
         fig = px.bar(df_marca, x='Faturamento', y='Marca', orientation='h',
                     text=df_marca['Faturamento'].apply(fmt_brl),
                     color='Faturamento', color_continuous_scale='Oranges')
         fig.update_traces(textposition='outside')
-        fig.update_layout(**chart_layout(height=400, xaxis_title='Faturamento (R$)'))
+        fig.update_layout(**chart_layout(height=500, xaxis_title='Faturamento (R$)'))
         st.plotly_chart(fig, use_container_width=True)
     
-    with tab_loja:
-        st.markdown('#### 🏪 Por Loja')
-        df_loja = df.groupby('Loja_Nome')['Faturamento_Bruto'].sum().reset_index().sort_values('Faturamento_Bruto', ascending=False)
-        df_loja.columns = ['Loja', 'Faturamento']
-        
-        fig = px.bar(df_loja, x='Loja', y='Faturamento',
-                    text=df_loja['Faturamento'].apply(fmt_brl),
-                    color='Faturamento', color_continuous_scale='Oranges')
-        fig.update_traces(textposition='outside')
-        fig.update_layout(**chart_layout(height=400, xaxis_title='Loja', yaxis_title='Faturamento (R$)', margin=dict(b=120)))
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with tab_tabela:
+    with tab5:
         st.markdown('#### 📋 Detalhamento Completo')
-        detalhe = df.groupby(['Loja_Nome', 'CanalVenda', 'Marca']).agg({
+        detalhe = df_filtrado.groupby(['CanalVenda', 'Marca']).agg({
             'Faturamento_Bruto': 'sum',
             'venda_id': 'nunique',
             'Qtd_Item': 'sum'
         }).reset_index().sort_values('Faturamento_Bruto', ascending=False)
-        detalhe.columns = ['Loja', 'Canal', 'Marca', 'Faturamento', 'Vendas', 'Itens']
+        detalhe.columns = ['Canal', 'Marca', 'Faturamento', 'Vendas', 'Itens']
         detalhe['Faturamento_fmt'] = detalhe['Faturamento'].apply(fmt_brl)
         
         st.dataframe(
-            detalhe[['Loja', 'Canal', 'Marca', 'Faturamento_fmt', 'Vendas', 'Itens']],
+            detalhe[['Canal', 'Marca', 'Faturamento_fmt', 'Vendas', 'Itens']],
             use_container_width=True, hide_index=True
         )
+
+
 
 def header():
     """Renderiza o header principal"""
@@ -494,9 +405,9 @@ def header():
     st.divider()
 
 def view_main():
-    """Função principal que renderiza header + tabs + views"""
+    """Função principal que renderiza header + view_delivery com todas as abas"""
     
-    # ✅ INICIALIZAR FILTROS ÚNICOS (sincronizados entre abas)
+    # ✅ INICIALIZAR FILTROS ÚNICOS
     if 'filtros_app' not in st.session_state:
         st.session_state.filtros_app = {
             'data_ini': data_ini_padrao,
@@ -505,15 +416,7 @@ def view_main():
         }
     
     header()
-    
-    # Abas principais
-    main_tab1, main_tab2 = st.tabs(['📊 Dashboard', '🏷️ Canais & Marcas'])
-    
-    with main_tab1:
-        view_delivery()
-    
-    with main_tab2:
-        view_categorias()
+    view_delivery()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # NÃO EXECUTAR AQUI - será chamado do main.py
