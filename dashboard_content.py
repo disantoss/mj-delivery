@@ -109,10 +109,13 @@ def carregar_dados_delivery(data_ini, data_fim, loja_nome=None):
     """
     ✅ OTIMIZADO: Carrega dados de DELIVERY com CanalVenda e Marca
     
+    IMPORTANTE: Carrega 2 semanas ANTES de data_ini pra poder calcular 
+    a semana anterior corretamente!
+    
     Melhorias:
     - Parametrização adequada (sem SQL injection)
     - INNER JOIN (melhor performance)
-    - Traz APENAS o período filtrado (sem dados extras)
+    - Traz período + 2 semanas anteriores (pra cálculo, não exibe)
     - Data como pd.Timestamp para comparações rápidas
     
     Args:
@@ -125,6 +128,9 @@ def carregar_dados_delivery(data_ini, data_fim, loja_nome=None):
         return None
     
     try:
+        # ✅ Trazer 2 semanas ANTES pra calcular semana anterior corretamente
+        data_ini_estendida = data_ini - timedelta(weeks=2)
+        
         # ✅ Query parametrizada - evita SQL injection
         query_text = text("""
         SELECT 
@@ -134,14 +140,14 @@ def carregar_dados_delivery(data_ini, data_fim, loja_nome=None):
         FROM vw_BI_fVendas v
         INNER JOIN vw_BI_dLoja l ON v.loja_id = l.Loja_ID
         WHERE v.ModoVenda = 'Delivery'
-            AND v.Data >= :data_ini
+            AND v.Data >= :data_ini_estendida
             AND v.Data <= :data_fim
             AND (:loja_nome IS NULL OR l.Loja_Nome = :loja_nome)
         ORDER BY v.Data DESC
         """)
         
         params = {
-            'data_ini': data_ini,
+            'data_ini_estendida': data_ini_estendida,
             'data_fim': data_fim,
             'loja_nome': loja_nome
         }
@@ -204,12 +210,16 @@ def carregar_dados_categorias(data_ini, data_fim):
 # ══════════════════════════════════════════════════════════════════════════════
 def calcular_semanas(df, data_ini, data_fim=None):
     """
-    Calcula faturamento semana atual vs semana anterior com filtro correto
+    ✅ SIMPLES: Semana Atual vs Semana Anterior
+    
+    Se filtrar 08/06 a 14/06:
+    - Semana Atual: 08/06 a 14/06 (período filtrado)
+    - Semana Anterior: 01/06 a 07/06 (7 dias antes do início)
     
     Args:
         df: DataFrame com dados
-        data_ini: Data inicial (referência)
-        data_fim: Data final (se None, usa a última data do df)
+        data_ini: Data inicial do filtro
+        data_fim: Data final do filtro
     
     Retorna:
         fat_semana_atual, fat_semana_anterior, variacao (%)
@@ -217,26 +227,20 @@ def calcular_semanas(df, data_ini, data_fim=None):
     if df is None or df.empty:
         return 0, 0, 0
     
-    # Se data_fim não for passada, usar a última data do DataFrame
-    if data_fim is None:
-        data_fim = df['Data'].max().date() if hasattr(df['Data'].max(), 'date') else df['Data'].max()
+    # Converter pra Timestamp
+    data_ini_ts = pd.Timestamp(data_ini)
+    data_fim_ts = pd.Timestamp(data_fim) if data_fim else pd.Timestamp(data_ini)
     
-    # Converter para pd.Timestamp se necessário
-    data_fim_ts = pd.Timestamp(data_fim)
-    
-    # Calcular segunda desta semana (contendo data_fim)
-    segunda_atual = data_fim_ts - timedelta(days=data_fim_ts.weekday())
-    
-    # Calcular segunda da semana anterior
-    segunda_anterior = segunda_atual - timedelta(weeks=1)
-    domingo_anterior = segunda_atual - timedelta(days=1)
-    
-    # Semana atual: de segunda até data_fim (pode ser incompleta)
-    df_semana_atual = df[(df['Data'] >= segunda_atual) & (df['Data'] <= data_fim_ts)]
+    # ✅ Semana ATUAL = período que o usuário filtrou
+    df_semana_atual = df[(df['Data'] >= data_ini_ts) & (df['Data'] <= data_fim_ts)]
     fat_semana_atual = df_semana_atual['Faturamento_Bruto'].sum() if not df_semana_atual.empty else 0
     
-    # Semana anterior: de segunda até domingo da semana anterior
-    df_semana_anterior = df[(df['Data'] >= segunda_anterior) & (df['Data'] <= domingo_anterior)]
+    # ✅ Semana ANTERIOR = 7 dias antes (mesmo período, só que anterior)
+    dias_periodo = (data_fim_ts - data_ini_ts).days + 1  # Quantidade de dias no período
+    data_anterior_fim = data_ini_ts - timedelta(days=1)  # Dia antes do início
+    data_anterior_ini = data_anterior_fim - timedelta(days=dias_periodo-1)  # Mesmo tamanho
+    
+    df_semana_anterior = df[(df['Data'] >= data_anterior_ini) & (df['Data'] <= data_anterior_fim)]
     fat_semana_anterior = df_semana_anterior['Faturamento_Bruto'].sum() if not df_semana_anterior.empty else 0
     
     # Variação percentual
@@ -257,27 +261,21 @@ def filtros_globais():
 def view_delivery():
     """Dashboard principal de Delivery - OTIMIZADO"""
     
-    # Usar session_state para evitar re-criar inputs
-    if 'dlv_filtros' not in st.session_state:
-        st.session_state.dlv_filtros = {
-            'data_ini': data_ini_padrao,
-            'data_fim': date.today(),
-            'loja_sel': 'Todas'
-        }
+    # ✅ Usar filtros_app unificados (sincronizados com outras abas)
     
     # Filtros inline
     col1, col2, col3 = st.columns(3)
     with col1:
-        data_ini = st.date_input('📅 Data Inicial', value=st.session_state.dlv_filtros['data_ini'], key='view_dlv_d_ini')
-        st.session_state.dlv_filtros['data_ini'] = data_ini
+        data_ini = st.date_input('📅 Data Inicial', value=st.session_state.filtros_app['data_ini'], key='view_dlv_d_ini')
+        st.session_state.filtros_app['data_ini'] = data_ini
     with col2:
-        data_fim = st.date_input('📅 Data Final', value=st.session_state.dlv_filtros['data_fim'], key='view_dlv_d_fim')
-        st.session_state.dlv_filtros['data_fim'] = data_fim
+        data_fim = st.date_input('📅 Data Final', value=st.session_state.filtros_app['data_fim'], key='view_dlv_d_fim')
+        st.session_state.filtros_app['data_fim'] = data_fim
     with col3:
         with st.spinner('🏪 Carregando lojas...'):
             lojas_opt = carregar_lojas()
-        loja_sel = st.selectbox('🏪 Loja', lojas_opt, index=lojas_opt.index(st.session_state.dlv_filtros['loja_sel']) if st.session_state.dlv_filtros['loja_sel'] in lojas_opt else 0, key='view_dlv_d_loja')
-        st.session_state.dlv_filtros['loja_sel'] = loja_sel
+        loja_sel = st.selectbox('🏪 Loja', lojas_opt, index=lojas_opt.index(st.session_state.filtros_app['loja_sel']) if st.session_state.filtros_app['loja_sel'] in lojas_opt else 0, key='view_dlv_d_loja')
+        st.session_state.filtros_app['loja_sel'] = loja_sel
         loja_nome = None if loja_sel == 'Todas' else loja_sel
     
     # ✅ OTIMIZADO: Apenas uma query, sem dados extras
@@ -288,11 +286,15 @@ def view_delivery():
         st.warning('📭 Nenhum delivery encontrado neste período.')
         return
     
-    # KPIs
-    faturamento = df['Faturamento_Bruto'].sum()
-    qtd_deliveries = df['venda_id'].nunique()
+    # ✅ FILTRAR para mostrar APENAS o período que o usuário filtrou
+    # (df tem 2 semanas extras pra calcular semana anterior, mas exibir só o pedido)
+    df_filtrado = df[(df['Data'] >= pd.Timestamp(data_ini)) & (df['Data'] <= pd.Timestamp(data_fim))]
+    
+    # KPIs usam APENAS o período filtrado
+    faturamento = df_filtrado['Faturamento_Bruto'].sum()
+    qtd_deliveries = df_filtrado['venda_id'].nunique()
     ticket_medio = faturamento / qtd_deliveries if qtd_deliveries > 0 else 0
-    itens = df['Qtd_Item'].sum()
+    itens = df_filtrado['Qtd_Item'].sum()
     
     col1, col2, col3, col4 = st.columns(4)
     col1.metric('🛵 Faturamento', fmt_brl(faturamento))
@@ -321,7 +323,7 @@ def view_delivery():
         
         st.divider()
         st.markdown('#### 📈 Faturamento Diário (Período Filtrado)')
-        df_daily = df.groupby('Data')['Faturamento_Bruto'].sum().reset_index().sort_values('Data')
+        df_daily = df_filtrado.groupby('Data')['Faturamento_Bruto'].sum().reset_index().sort_values('Data')
         fig = px.area(df_daily, x='Data', y='Faturamento_Bruto', color_discrete_sequence=[C['delivery']])
         fig.update_traces(line=dict(width=3))
         fig.update_layout(**chart_layout(height=400, xaxis_title='Data', yaxis_title='Faturamento (R$)'))
@@ -329,7 +331,7 @@ def view_delivery():
     
     with tab2:
         st.markdown('#### 🏪 Por Loja')
-        df_loja = df.groupby('Loja_Nome').agg({'Faturamento_Bruto': 'sum', 'venda_id': 'nunique'}).reset_index()
+        df_loja = df_filtrado.groupby('Loja_Nome').agg({'Faturamento_Bruto': 'sum', 'venda_id': 'nunique'}).reset_index()
         df_loja.columns = ['Loja', 'Faturamento', 'Deliveries']
         df_loja = df_loja.sort_values('Faturamento', ascending=False)
         
@@ -345,7 +347,7 @@ def view_delivery():
     
     with tab3:
         st.markdown('#### ⏰ Por Turno')
-        df_turno = df.groupby('Turno_Venda')['Faturamento_Bruto'].sum().reset_index().sort_values('Faturamento_Bruto', ascending=False)
+        df_turno = df_filtrado.groupby('Turno_Venda')['Faturamento_Bruto'].sum().reset_index().sort_values('Faturamento_Bruto', ascending=False)
         
         fig = px.bar(df_turno, x='Turno_Venda', y='Faturamento_Bruto', color='Turno_Venda',
                     color_discrete_map=CORES_TURNO, text=df_turno['Faturamento_Bruto'].apply(fmt_brl))
@@ -355,7 +357,7 @@ def view_delivery():
     
     with tab4:
         st.markdown('#### 🛣️ Faturamento por Canal de Venda')
-        df_canal = df.groupby('CanalVenda').agg({
+        df_canal = df_filtrado.groupby('CanalVenda').agg({
             'Faturamento_Bruto': 'sum',
             'venda_id': 'nunique',
             'Qtd_Item': 'sum'
@@ -382,25 +384,20 @@ def view_delivery():
 def view_categorias():
     """Análise por Canal, Marca e Loja - OTIMIZADO"""
     
-    if 'cat_filtros' not in st.session_state:
-        st.session_state.cat_filtros = {
-            'data_ini': data_ini_padrao,
-            'data_fim': date.today(),
-            'loja_sel': 'Todas'
-        }
+    # ✅ Usar filtros_app unificados (sincronizados com outras abas)
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        data_ini = st.date_input('📅 Data Inicial', value=st.session_state.cat_filtros['data_ini'], key='view_cat_d_ini')
-        st.session_state.cat_filtros['data_ini'] = data_ini
+        data_ini = st.date_input('📅 Data Inicial', value=st.session_state.filtros_app['data_ini'], key='view_cat_d_ini')
+        st.session_state.filtros_app['data_ini'] = data_ini
     with col2:
-        data_fim = st.date_input('📅 Data Final', value=st.session_state.cat_filtros['data_fim'], key='view_cat_d_fim')
-        st.session_state.cat_filtros['data_fim'] = data_fim
+        data_fim = st.date_input('📅 Data Final', value=st.session_state.filtros_app['data_fim'], key='view_cat_d_fim')
+        st.session_state.filtros_app['data_fim'] = data_fim
     with col3:
         with st.spinner('🏪 Carregando lojas...'):
             lojas_opt = carregar_lojas()
-        loja_sel = st.selectbox('🏪 Loja', lojas_opt, index=lojas_opt.index(st.session_state.cat_filtros['loja_sel']) if st.session_state.cat_filtros['loja_sel'] in lojas_opt else 0, key='view_cat_d_loja')
-        st.session_state.cat_filtros['loja_sel'] = loja_sel
+        loja_sel = st.selectbox('🏪 Loja', lojas_opt, index=lojas_opt.index(st.session_state.filtros_app['loja_sel']) if st.session_state.filtros_app['loja_sel'] in lojas_opt else 0, key='view_cat_d_loja')
+        st.session_state.filtros_app['loja_sel'] = loja_sel
     
     with st.spinner('🔍 Carregando dados de categorias...'):
         df = carregar_dados_categorias(data_ini, data_fim)
@@ -499,6 +496,15 @@ def header():
 
 def view_main():
     """Função principal que renderiza header + tabs + views"""
+    
+    # ✅ INICIALIZAR FILTROS ÚNICOS (sincronizados entre abas)
+    if 'filtros_app' not in st.session_state:
+        st.session_state.filtros_app = {
+            'data_ini': data_ini_padrao,
+            'data_fim': date.today(),
+            'loja_sel': 'MJP NYC'  # ✅ Padrão pré-filtrado
+        }
+    
     header()
     
     # Abas principais
