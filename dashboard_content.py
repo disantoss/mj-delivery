@@ -48,10 +48,10 @@ def chart_layout(**kw):
     base.update(kw)
     return base
 
-# Data padrão: últimas 5 semanas (período atual + 4 semanas atrás)
+# Data padrão: últimas 2 semanas (período atual + 1 semana atrás)
 hoje = date.today()
 segunda_atual = hoje - timedelta(days=hoje.weekday())  # Segunda desta semana
-data_ini_padrao = segunda_atual - timedelta(weeks=4)   # 4 semanas atrás
+data_ini_padrao = segunda_atual - timedelta(weeks=2)   # 2 semanas atrás
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONEXÃO BANCO
