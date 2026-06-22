@@ -91,18 +91,18 @@ def fmt_brl(val):
 # ══════════════════════════════════════════════════════════════════════════════
 @st.cache_data(ttl=300, show_spinner=False)
 def carregar_lojas():
-    """Carrega lista de lojas do banco"""
+    """Carrega lista de lojas do banco - SEM opção "Todas" """
     engine = get_db_connection()
     if engine is None:
-        return ['Todas']
+        return ['MJP NYC']
     
     try:
         query = "SELECT DISTINCT Loja_Nome FROM vw_BI_dLoja ORDER BY Loja_Nome"
         df = pd.read_sql_query(query, engine)
-        lojas = ['Todas'] + df['Loja_Nome'].tolist()
-        return lojas
+        lojas = df['Loja_Nome'].tolist()
+        return lojas if lojas else ['MJP NYC']
     except:
-        return ['Todas']
+        return ['MJP NYC']
 
 @st.cache_data(ttl=300, show_spinner=False)
 def carregar_dados_delivery(data_ini, data_fim, loja_nome=None):
@@ -276,7 +276,7 @@ def view_delivery():
             lojas_opt = carregar_lojas()
         loja_sel = st.selectbox('🏪 Loja', lojas_opt, index=lojas_opt.index(st.session_state.filtros_app['loja_sel']) if st.session_state.filtros_app['loja_sel'] in lojas_opt else 0, key='view_dlv_d_loja')
         st.session_state.filtros_app['loja_sel'] = loja_sel
-        loja_nome = None if loja_sel == 'Todas' else loja_sel
+        loja_nome = loja_sel  # ✅ SEMPRE tem loja (não é mais "Todas")
     
     # ✅ OTIMIZADO: Apenas uma query, sem dados extras
     with st.spinner('🔍 Carregando dados de delivery...'):
@@ -406,12 +406,11 @@ def view_categorias():
         st.warning('📭 Nenhum dado encontrado neste período.')
         return
     
-    # Filtrar loja se necessário
-    if loja_sel != 'Todas':
-        df = df[df['Loja_Nome'] == loja_sel]
-        if df.empty:
-            st.warning('📭 Nenhum dado encontrado para esta loja.')
-            return
+    # ✅ SEMPRE filtrar por loja (não tem mais opção "Todas")
+    df = df[df['Loja_Nome'] == loja_sel]
+    if df.empty:
+        st.warning('📭 Nenhum dado encontrado para esta loja.')
+        return
     
     # KPIs gerais
     fat_geral = df['Faturamento_Bruto'].sum()
