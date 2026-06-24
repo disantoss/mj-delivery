@@ -307,21 +307,6 @@ def view_delivery():
     tab1, tab2, tab3, tab4, tab5 = st.tabs(['📈 Tendência', '⏰ Turno', '🛣️ Por Canal', '🏷️ Por Marca', '📋 Tabela'])
     
     with tab1:
-        st.markdown('#### 📊 Comparação: Semana Atual vs Semana Anterior')
-        
-        # Calcular semanas
-        fat_atual, fat_anterior, variacao = calcular_semanas(df, data_ini, data_fim)
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric('📆 Semana Atual', fmt_brl(fat_atual))
-        with col2:
-            st.metric('📅 Semana Anterior', fmt_brl(fat_anterior))
-        with col3:
-            cor = '🟢' if variacao >= 0 else '🔴'
-            st.metric(f'{cor} Variação', f'{variacao:.1f}%')
-        
-        st.divider()
         st.markdown('#### 📈 Faturamento Diário (Período Filtrado)')
         df_daily = df_filtrado.groupby('Data')['Faturamento_Bruto'].sum().reset_index().sort_values('Data')
         fig = px.area(df_daily, x='Data', y='Faturamento_Bruto', color_discrete_sequence=[C['delivery']])
