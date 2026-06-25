@@ -48,10 +48,11 @@ def chart_layout(**kw):
     base.update(kw)
     return base
 
-# Data padrão: últimas 2 semanas (período atual + 1 semana atrás)
+# ✅ Data padrão: APENAS semana atual + semana anterior (mais rápido!)
+# Ao invés de carregar 4 semanas, carrega apenas 2 semanas
 hoje = date.today()
 segunda_atual = hoje - timedelta(days=hoje.weekday())  # Segunda desta semana
-data_ini_padrao = segunda_atual - timedelta(weeks=2)   # 2 semanas atrás
+data_ini_padrao = segunda_atual - timedelta(weeks=1)   # Segunda da semana anterior (14 dias)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONEXÃO BANCO
@@ -89,7 +90,7 @@ def fmt_brl(val):
 # ══════════════════════════════════════════════════════════════════════════════
 # CARREGAMENTO DE DADOS - OTIMIZADO COM PARAMETRIZAÇÃO
 # ══════════════════════════════════════════════════════════════════════════════
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)  # 1 hora
 def carregar_lojas():
     """Carrega lista de lojas do banco - SEM opção "Todas" """
     engine = get_db_connection()
@@ -104,7 +105,7 @@ def carregar_lojas():
     except:
         return ['MJP NYC']
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)  # 1 hora
 def carregar_dados_delivery(data_ini, data_fim, loja_nome=None):
     """
     ✅ OTIMIZADO: Carrega dados de DELIVERY com CanalVenda e Marca
@@ -165,7 +166,7 @@ def carregar_dados_delivery(data_ini, data_fim, loja_nome=None):
         st.error(f"❌ Erro ao carregar dados: {str(e)[:150]}")
         return None
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)  # 1 hora
 def carregar_dados_categorias(data_ini, data_fim):
     """
     ✅ OTIMIZADO: Carrega dados pra análise de Canais & Marcas
@@ -252,16 +253,18 @@ def calcular_semanas(df, data_ini, data_fim=None):
     return fat_semana_atual, fat_semana_anterior, variacao
 
 def filtros_globais():
-    """Retorna os filtros padrão"""
-    return date.today() - timedelta(weeks=4), date.today(), 'Todas'
+    """Retorna os filtros padrão - OTIMIZADO PARA TEMPO REAL"""
+    # ✅ Semana atual + semana anterior (14 dias)
+    hoje = date.today()
+    segunda_atual = hoje - timedelta(days=hoje.weekday())
+    data_ini = segunda_atual - timedelta(weeks=1)
+    return data_ini, hoje, 'Todas'
 
 # ══════════════════════════════════════════════════════════════════════════════
 # VIEWS
 # ══════════════════════════════════════════════════════════════════════════════
 def view_delivery():
     """Dashboard principal de Delivery - OTIMIZADO"""
-    
-    # ✅ Usar filtros_app unificados (sincronizados com outras abas)
     
     # Filtros inline
     col1, col2, col3 = st.columns(3)
@@ -271,12 +274,19 @@ def view_delivery():
     with col2:
         data_fim = st.date_input('📅 Data Final', value=st.session_state.filtros_app['data_fim'], key='view_dlv_d_fim')
         st.session_state.filtros_app['data_fim'] = data_fim
+    
+    # ✅ VALIDAÇÃO: Máximo 2 semanas (14 dias)
+    diferenca_dias = (data_fim - data_ini).days
+    if diferenca_dias > 14:
+        st.error("❌ Máximo 14 dias! Selecione um período menor.")
+        return
+    
     with col3:
         with st.spinner('🏪 Carregando lojas...'):
             lojas_opt = carregar_lojas()
         loja_sel = st.selectbox('🏪 Loja', lojas_opt, index=lojas_opt.index(st.session_state.filtros_app['loja_sel']) if st.session_state.filtros_app['loja_sel'] in lojas_opt else 0, key='view_dlv_d_loja')
         st.session_state.filtros_app['loja_sel'] = loja_sel
-        loja_nome = loja_sel  # ✅ SEMPRE tem loja (não é mais "Todas")
+        loja_nome = loja_sel
     
     # ✅ OTIMIZADO: Apenas uma query, sem dados extras
     with st.spinner('🔍 Carregando dados de delivery...'):
